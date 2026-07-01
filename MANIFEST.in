@@ -1,0 +1,3 @@
+include src/turbotext/_fast.pyx
+include src/turbotext/_fast.c
+include src/turbotext/_fast.pyi

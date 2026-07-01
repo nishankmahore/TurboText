@@ -1,0 +1,97 @@
+name: Publish to PyPI
+
+# Triggers on a GitHub Release being published.
+# Create a release via: GitHub UI → Releases → Draft a new release → tag v0.1.0
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  # ─── 1. Build binary wheels ─────────────────────────────────────────────────
+  build-wheels:
+    name: Wheels · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # cibuildwheel handles QEMU for Linux aarch64 cross-compilation
+      - name: Set up QEMU (Linux aarch64)
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.22.0
+        # Config lives in [tool.cibuildwheel] in pyproject.toml
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  # ─── 2. Build source distribution ──────────────────────────────────────────
+  build-sdist:
+    name: Source distribution
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build cython>=3.0
+
+      - name: Build sdist
+        run: python -m build --sdist
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  # ─── 3. Publish to PyPI ─────────────────────────────────────────────────────
+  publish:
+    name: Publish to PyPI
+    needs: [build-wheels, build-sdist]
+    runs-on: ubuntu-latest
+
+    # PyPI trusted publishing — no API token needed.
+    # One-time setup: go to pypi.org → your project → Publishing → add a
+    # "GitHub Actions" trusted publisher pointing at this repo + workflow file.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/turbotext
+    permissions:
+      id-token: write   # required for OIDC trusted publishing
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "wheels-*"
+          path: dist
+          merge-multiple: true
+
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: Show artifacts
+        run: ls -lh dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
